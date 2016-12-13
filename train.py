@@ -4,6 +4,7 @@ import json
 import pickle
 import os
 import csv
+import matplotlib.pyplot as plt
 
 import cv2
 from skimage.exposure import equalize_adapthist
@@ -12,8 +13,8 @@ from sklearn.utils import shuffle
 
 # Import the keras layers
 from keras.models import Sequential
-from keras.layers import Dense, Dropout, Activation, Flatten
-from keras.layers import Conv2D, MaxPooling2D
+from keras.layers import Dense, Dropout, Flatten, Lambda
+from keras.layers import Convolution2D, Activation
 from keras.optimizers import Adam
 from keras.models import model_from_json
 from keras.utils import np_utils
@@ -26,73 +27,78 @@ def preprocess_img(img):
     :param img: The image to be pre-processed
     :return: Returns the pre-processed image
     """
-    # fig = plt.figure()
-
+    #fig = plt.figure()
     img = cv2.resize(img, None, fx=0.1, fy=0.1)
-    # fig.add_subplot(1, 5, 1),plt.imshow(img)
+    #fig.add_subplot(1, 5, 1),plt.imshow(img)
 
     #blur = cv2.medianBlur(img, 1)
-    # fig.add_subplot(1, 5, 3), plt.imshow(blur, cmap='gray')
+    #fig.add_subplot(1, 5, 3), plt.imshow(blur, cmap='gray')
 
     equ = equalize_adapthist(img)
-    # fig.add_subplot(1, 5, 5), plt.imshow(equ, cmap='gray')
+    #fig.add_subplot(1, 5, 5), plt.imshow(equ, cmap='gray')
 
-    # plt.show()
+    #plt.show()
     return equ
 
 
-def data_generator():
+def data_generator(path='/home/karti/data/data/'):
     x = []
     y = []
     while 1:
-        f = open('/home/karti/simulator-linux-50/track1/driving_log.csv', 'r')
+        f = open(os.path.join(path,'driving_log.csv'), 'r')
         rows = f.readlines()
         rows = shuffle(rows)
         for row in rows:
             row = row.split(', ')
-            if float(row[6]) > 5:
-                img = cv2.imread(row[0], 0)
-                x.append(preprocess_img(img))
+            img_path = os.path.join(path,row[0])
+            if os.path.exists(img_path):
+                img = cv2.imread(os.path.join(path,row[0]))
+                x.append(img)
                 y.append(float(row[3]))
 
-            if len(y) >= 256:
-                x = np.resize(x, (256, 16, 32, 1))
+            if len(y) >= 400:
+                x = np.resize(x, (400, 160, 320, 3))
                 y = np.array(y)
                 yield (x, y)
                 x = []
                 y = []
         f.close()
 
+ch, row, col = 3, 160, 320
 
 # Define the model
 model = Sequential()
-model.add(Conv2D(24, 3, 3, input_shape=(16, 32, 1)))
-model.add(MaxPooling2D())
+model.add(Lambda(lambda x: x/127.5 - 1., input_shape=(row, col, ch), output_shape=(row, col, ch)))
+model.add(Convolution2D(16, 8, 8, subsample=(4, 4), border_mode="same"))
 model.add(Activation('relu'))
-model.add(Conv2D(48, 3, 3))
-model.add(MaxPooling2D())
+model.add(Convolution2D(32, 5, 5, subsample=(2, 2), border_mode="same"))
 model.add(Activation('relu'))
+model.add(Convolution2D(64, 5, 5, subsample=(2, 2), border_mode="same"))
 model.add(Flatten())
-model.add(Dense(100))
+model.add(Dropout(.2))
 model.add(Activation('relu'))
-model.add(Dense(50))
+model.add(Dense(512))
+model.add(Dropout(.5))
 model.add(Activation('relu'))
-model.add(Dense(10))
+model.add(Dense(128))
+model.add(Dropout(.5))
+model.add(Activation('relu'))
+model.add(Dense(64))
+model.add(Dropout(.5))
+model.add(Activation('relu'))
+model.add(Dense(32))
+model.add(Dropout(.5))
 model.add(Activation('relu'))
 model.add(Dense(1))
 model.summary()
 
 # Compile and run the model
-model.compile(loss='mse',
-              optimizer=Adam(lr=1e-5),
-              metrics=['accuracy'])
-try:
-    history = model.fit_generator(data_generator(), samples_per_epoch=19200, nb_epoch=3, verbose=1)
-except:
-    print ('')
+model.compile(loss='mse', optimizer='adam')
+history = model.fit_generator(data_generator(), samples_per_epoch=8000, nb_epoch=1000, verbose=1)
 
 # Save the model and weights
 json_string = model.to_json()
 with open('model.json', 'w') as outfile:
     json.dump(json_string, outfile)
 model.save_weights('model.h5')
+print ('Model saved')
