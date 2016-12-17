@@ -16,6 +16,8 @@ from keras.models import model_from_json
 from keras.preprocessing.image import ImageDataGenerator, array_to_img, img_to_array
 from skimage.exposure import equalize_adapthist
 
+from model import img_pre_process
+
 sio = socketio.Server()
 app = Flask(__name__)
 model = None
@@ -33,12 +35,17 @@ def telemetry(sid, data):
     imgString = data["image"]
     image = Image.open(BytesIO(base64.b64decode(imgString)))
     img = np.asarray(image)
-    img = np.resize(img, (1, 160, 320, 3))
+    img = img_pre_process(img)
 
     # This model currently assumes that the features of the model are just the images. Feel free to change this.
     steering_angle = float(model.predict(img, batch_size=1))
     # The driving model currently just outputs a constant throttle. Feel free to edit this.
-    throttle = 1.0
+    if abs(steering_angle) > 0.2:
+        throttle = 0.05
+    elif abs(steering_angle) > 0.1:
+        throttle = 0.1
+    else:
+        throttle = 0.2
     print(steering_angle, throttle)
     send_control(steering_angle, throttle)
 
@@ -62,7 +69,8 @@ if __name__ == '__main__':
     help='Path to model definition json. Model weights should be on the same path.')
     args = parser.parse_args()
     with open(args.model, 'r') as jfile:
-        model = model_from_json(json.load(jfile))
+        json_model = jfile.read()
+        model = model_from_json(json_model)
 
     model.compile("adam", "mse")
     weights_file = args.model.replace('json', 'h5')
