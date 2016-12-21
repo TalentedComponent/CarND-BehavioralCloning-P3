@@ -7,14 +7,12 @@ import pandas as pd
 
 # Import image processing libs
 import cv2
-from scipy.misc import imresize
 
 # Import the keras layers
-from keras.models import Model
-from keras.layers import GlobalAveragePooling2D, Dense, Dropout, Input
+from keras.models import Sequential
+from keras.layers import Convolution2D, MaxPooling2D, Dense, Dropout, Flatten, Lambda
 from keras.models import model_from_json
 from keras.optimizers import Adam
-from keras.applications.vgg16 import VGG16
 
 """
 CONSTANTS
@@ -22,23 +20,21 @@ CONSTANTS
 PATH = '/home/karti/sdc-live-trainer/data'  # Data path
 
 # Data augmentation constants
-ANGLE_BIAS = 0.4  # Bias for choosing a good distribution of angles for training
-TRANS_X_RANGE = 50  # Number of translation pixels up to in the X direction for augmented data (-RANGE/2, RANGE/2)
+TRANS_X_RANGE = 100  # Number of translation pixels up to in the X direction for augmented data (-RANGE/2, RANGE/2)
 TRANS_Y_RANGE = 40  # Number of translation pixels up to in the Y direction for augmented data (-RANGE/2, RANGE/2)
-ANGLE_PER_TRANS = .05  # Maximum angle change when translating in the X direction
-OFF_CENTER_IMG_ANGLE = .15  # Angle change when using off center images
-BRIGHTNESS_RANGE = .1  # The range of brightness changes
-ANGLE_SMOOTH_DIV = 3.  # A divisor to smooth the angles in the training set to make the drive smoother
+ANGLE_PER_TRANS = .15  # Maximum angle change when translating in the X direction
+OFF_CENTER_IMG_ANGLE = .2  # Angle change when using off center images
+BRIGHTNESS_RANGE = .25  # The range of brightness changes
 
 # Training constants
-BATCH = 64  # Number of images per batch
-TRAIN_BATCH_PER_EPOCH = 320  # Number of batches per epoch for training
+BATCH = 128  # Number of images per batch
+TRAIN_BATCH_PER_EPOCH = 160  # Number of batches per epoch for training
 TRAIN_VAL_CHECK = 1e-3  # The maximum increase in validation loss during re-training
-RETRAIN_LR = 1e-5  # The learning rate used when re-training
+MIN_EPOCHS = 4  # Minimum number of epochs to train the model on
 
 # Image constants
-IMG_ROWS = 140  # Number of rows in the image
-IMG_COLS = 200  # Number of cols in the image
+IMG_ROWS = 64  # Number of rows in the image
+IMG_COLS = 64  # Number of cols in the image
 IMG_CH = 3  # Number of channels in the image
 
 
@@ -48,24 +44,22 @@ def img_pre_process(img):
     :param img: The image to be processed
     :return: Returns the processed image
     """
-
     # Remove the unwanted top scene and retain only the track
     roi = img[60:140, :, :]
 
     # Resize the image
-    resize = imresize(roi, (IMG_ROWS, IMG_COLS))
+    resize = cv2.resize(roi, (IMG_ROWS, IMG_COLS), interpolation=cv2.INTER_AREA)
 
-    # Normalize the image to -1 to 1
-    norm = ((resize / 255.) - 0.5 * 2.)
-    return np.resize(norm, (1, IMG_ROWS, IMG_COLS, IMG_CH))
+    # Return the image sized as a 4D array
+    return np.resize(resize, (1, IMG_ROWS, IMG_COLS, IMG_CH))
 
 
 def img_change_brightness(img):
     # Convert the image to HSV
     temp = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-    # Compute a random brightness value (only to decrease brightness) and apply it to the image
-    brightness = BRIGHTNESS_RANGE + np.random.uniform() - 0.5
+    # Compute a random brightness value and apply to the image
+    brightness = BRIGHTNESS_RANGE + np.random.uniform()
     temp[:, :, 2] = temp[:, :, 2] * brightness
 
     # Convert back to RGB and return
@@ -83,24 +77,28 @@ def img_translate(img, x_translation):
     return cv2.warpAffine(img, translation_matrix, (img.shape[1], img.shape[0]))
 
 
-def data_augment(img_path, angle, threshold, augment):
-    x_translation = 0.
-    if augment:
-        # Randomly form the X translation distance and compute the resulting steering angle change
-        x_translation = (TRANS_X_RANGE * np.random.uniform()) - (TRANS_X_RANGE / 2)
-        new_angle = angle + ((x_translation / TRANS_X_RANGE) * 2) * ANGLE_PER_TRANS
+def data_augment(img_path, angle, threshold, bias):
+    """
+    Augments the data by generating new images based on the base image found in img_path
+    :param img_path: Path to the image to be used as the base image
+    :param angle: The steering angle of the current image
+    :param threshold: If the new angle is below this threshold, then the image is dropped
+    :return:
+        new_img, new_angle of the augmented image / angle (or)
+        None, None if the new angle is below the threshold
+    """
+    # Randomly form the X translation distance and compute the resulting steering angle change
+    x_translation = (TRANS_X_RANGE * np.random.uniform()) - (TRANS_X_RANGE / 2)
+    new_angle = angle + (abs(angle) / 0.125) * ((x_translation / TRANS_X_RANGE) * 2) * ANGLE_PER_TRANS
 
-        # Check if the new angle does not meets the threshold requirements
-        if (abs(new_angle) + ANGLE_BIAS) < threshold:
-            return None, None
-    else:
-        new_angle = angle
+    # Check if the new angle does not meets the threshold requirements
+    if (abs(new_angle) + bias) < threshold:
+        return None, None
 
     # Hurray, the newly generated angle matches the threshold
     img = cv2.imread(img_path)
-    if augment:
-        img = img_change_brightness(img)
-        img = img_translate(img, x_translation)
+    img = img_change_brightness(img)
+    img = img_translate(img, x_translation)
     img = img_pre_process(img)
 
     # Finally, lets' decide if we want to flip the image or not
@@ -124,16 +122,15 @@ def val_data_generator(df):
 
         for idx in np.arange(BATCH):
             _x[idx] = img_pre_process(cv2.imread(os.path.join(PATH, df.center.iloc[idx].strip())))
-            _y[idx] = df.steering.iloc[idx] / ANGLE_SMOOTH_DIV
+            _y[idx] = df.steering.iloc[idx]
 
         yield _x, _y
 
 
-def train_data_generator(df, augment):
+def train_data_generator(df, bias):
     """
     Training data generator
     :param df: Pandas data frame consisting of all the training data
-    :param augment: Boolean to state if data augmentation should be used or not
     :return: (x[BATCH, IMG_ROWS, IMG_COLS, NUM_CH], y)
     """
     _x = np.zeros((BATCH, IMG_ROWS, IMG_COLS, IMG_CH), dtype=np.float)
@@ -156,22 +153,17 @@ def train_data_generator(df, augment):
         fine line and this is a step to be taken near the end of the training
         session
         """
-        angle /= ANGLE_SMOOTH_DIV
-
-        # If augmentation is enabled, pick one of the images, left, right or center
-        if augment:
-            img_choice = np.random.randint(3)
-        else:
-            img_choice = 1
+        # Pick one of the images, left, right or center
+        img_choice = np.random.randint(3)
 
         if img_choice == 0:
             img_path = os.path.join(PATH, df.left.iloc[idx].strip())
-            angle += OFF_CENTER_IMG_ANGLE
+            angle += (abs(angle) / 0.125) * OFF_CENTER_IMG_ANGLE
         elif img_choice == 1:
             img_path = os.path.join(PATH, df.center.iloc[idx].strip())
         else:
             img_path = os.path.join(PATH, df.right.iloc[idx].strip())
-            angle -= OFF_CENTER_IMG_ANGLE
+            angle -= (abs(angle) / 0.125) * OFF_CENTER_IMG_ANGLE
 
         """
         Randomly distort the (img, angle) to generate new data
@@ -180,7 +172,7 @@ def train_data_generator(df, augment):
         only then do we accept the transformation.
         """
         threshold = np.random.uniform()
-        img, angle = data_augment(img_path, angle, threshold, augment)
+        img, angle = data_augment(img_path, angle, threshold, bias)
 
         # Check if we've got valid values
         if img is not None:
@@ -220,37 +212,64 @@ def get_model():
             return model
 
     """
-    Get the pre-trained convolutional layers as a feature extractor
-    from VGG16
+    Reform the VGG16 net
     """
-    input_layer = Input(shape=(IMG_ROWS, IMG_COLS, IMG_CH))
-    base_model = VGG16(input_tensor=input_layer,
-                       weights='imagenet',
-                       include_top=False)
+    model = Sequential()
+
+    # Add a normalization layer
+    model.add(Lambda(lambda x: x/127.5 - .5,
+                     input_shape=(IMG_ROWS, IMG_COLS, IMG_CH),
+                     output_shape=(IMG_ROWS, IMG_COLS, IMG_CH)))
+
+    # Add a color map layer as suggested by Vivek Yadav to let the model figure out
+    # the best color map for this hypothesis
+    model.add(Convolution2D(3, 1, 1, border_mode='same', name='color_conv'))
+
+    # Add the VGG like layers
+    model.add(Convolution2D(64, 3, 3, activation='elu', border_mode='same', name='block1_conv1'))
+    model.add(Convolution2D(64, 3, 3, activation='elu', border_mode='same', name='block1_conv2'))
+    model.add(MaxPooling2D((2, 2), strides=(2, 2), name='block1_pool'))
+
+    # Block 2
+    model.add(Convolution2D(128, 3, 3, activation='elu', border_mode='same', name='block2_conv1'))
+    model.add(Convolution2D(128, 3, 3, activation='elu', border_mode='same', name='block2_conv2'))
+    model.add(MaxPooling2D((2, 2), strides=(2, 2), name='block2_pool'))
+
+    # Block 3
+    model.add(Convolution2D(256, 3, 3, activation='elu', border_mode='same', name='block3_conv1'))
+    model.add(Convolution2D(256, 3, 3, activation='elu', border_mode='same', name='block3_conv2'))
+    model.add(Convolution2D(256, 3, 3, activation='elu', border_mode='same', name='block3_conv3'))
+    model.add(MaxPooling2D((2, 2), strides=(2, 2), name='block3_pool'))
+
+    # Block 4
+    model.add(Convolution2D(512, 3, 3, activation='elu', border_mode='same', name='block4_conv1'))
+    model.add(Convolution2D(512, 3, 3, activation='elu', border_mode='same', name='block4_conv2'))
+    model.add(Convolution2D(512, 3, 3, activation='elu', border_mode='same', name='block4_conv3'))
+    model.add(MaxPooling2D((2, 2), strides=(2, 2), name='block4_pool'))
+
+    # Block 5
+    model.add(Convolution2D(512, 3, 3, activation='elu', border_mode='same', name='block5_conv1'))
+    model.add(Convolution2D(512, 3, 3, activation='elu', border_mode='same', name='block5_conv2'))
+    model.add(Convolution2D(512, 3, 3, activation='elu', border_mode='same', name='block5_conv3'))
+    model.add(MaxPooling2D((2, 2), strides=(2, 2), name='block5_pool'))
+
+    model.add(Flatten(name='Flatten'))
+    model.add(Dense(1024, activation='elu', name='fc1'))
+    model.add(Dropout(0.5, name='fc1_dropout'))
+    model.add(Dense(256, activation='elu', name='fc2'))
+    model.add(Dropout(0.5, name='fc2_dropout'))
+    model.add(Dense(128, activation='elu', name='fc3'))
+    model.add(Dropout(0.5, name='fc3_dropout'))
+    model.add(Dense(64, activation='elu', name='fc4'))
+    model.add(Dropout(0.5, name='fc4_dropout'))
+    model.add(Dense(32, activation='elu', name='fc5'))
+    model.add(Dropout(0.5, name='fc5_dropout'))
+    model.add(Dense(1, init='zero', name='output'))
 
     """
-    Add spatial global average pooling
+    Load the VGG16 weights
     """
-    temp = base_model.output
-    temp = GlobalAveragePooling2D()(temp)
-
-    """
-    Add fully connected layers
-    """
-    temp = Dense(1024, activation='elu')(temp)
-    temp = Dropout(0.5)(temp)
-    temp = Dense(512, activation='elu')(temp)
-    temp = Dropout(0.5)(temp)
-    temp = Dense(128, activation='elu')(temp)
-    temp = Dropout(0.5)(temp)
-    temp = Dense(32, activation='elu')(temp)
-    temp = Dropout(0.5)(temp)
-    predictions = Dense(1, init='zero')(temp)
-
-    """
-    Create the full model
-    """
-    model = Model(input=base_model.input, output=predictions)
+    model.load_weights('vgg16_weights.h5', by_name=True)
 
     """
     Print the summary
@@ -259,53 +278,14 @@ def get_model():
     return model
 
 
-def train_model(model, train_data, val_data, init=False):
+def train_model(model, train_data, val_data):
     """
     Trains the given model
     :param model: A keras model
     :param train_data: Training data as a pandas data frame
     :param val_data: The validation data as a pandas data frame
-    :param init: Are we training from scratch of re-training
     :return: The history of the model
     """
-
-    # If we are training the FC layers from scratch
-    if init:
-        # Freeze the feature extractor (it's 19 layers)
-        for layer in model.layers[:19]:
-            layer.trainable = False
-        for layer in model.layers[19:]:
-            layer.trainable = True
-
-        """
-        Compile and train the model naturally for 1 epoch so that
-        the fully connected layer can settle down
-        Note:
-        1. We train with the default learning rate, we want the data to overfit
-        slightly. This is because this is a complex hypothesis. So asking the model
-        to generalize directly is like asking a child to learn complex linear algebra
-        on the first standard. We always ask children to memorize simple formulas and
-        then slowly eventually, they learn to generalize.
-        2. To support the above process, we also do not feed augmented data to the
-        model in the first training run
-        """
-        model.compile(loss='mse', optimizer='adam')
-
-        # Get an evaluation on the validation set
-        print('Initial evaluation loss = {}'.format(
-            model.evaluate_generator(val_data_generator(val_data), val_samples=BATCH)))
-
-        # Try some predictions before we start..
-        test_predictions(model, train_data)
-
-        # Train over some epochs without data augmentation to train the fully connected layers
-        model.fit_generator(
-            train_data_generator(train_data, False),
-            samples_per_epoch=TRAIN_BATCH_PER_EPOCH * BATCH,
-            nb_epoch=1,
-            validation_data=val_data_generator(val_data),
-            nb_val_samples=BATCH,
-            verbose=1)
 
     """
     Now that the fully connected layer is fully settled, let's get the full training
@@ -323,7 +303,7 @@ def train_model(model, train_data, val_data, init=False):
         layer.trainable = True
 
     # Recompile the model with a finer learning rate
-    model.compile(optimizer=Adam(lr=RETRAIN_LR), loss='mse')
+    model.compile(optimizer=Adam(1e-5), loss='mse')
 
     # Get an evaluation on the validation set
     val_loss = model.evaluate_generator(val_data_generator(val_data), val_samples=BATCH)
@@ -334,10 +314,12 @@ def train_model(model, train_data, val_data, init=False):
 
     num_runs = 0
     while True:
-        print('Run {}'.format(num_runs+1), end=': ')
+        bias = 1. / (num_runs + 1.)
+
+        print('Run {} with bias {}'.format(num_runs+1, bias), end=': ')
 
         history = model.fit_generator(
-            train_data_generator(train_data, True),
+            train_data_generator(train_data, bias),
             samples_per_epoch=TRAIN_BATCH_PER_EPOCH * BATCH,
             nb_epoch=1,
             validation_data=val_data_generator(val_data),
@@ -352,10 +334,10 @@ def train_model(model, train_data, val_data, init=False):
         # go south...
         # Think that statement is very offensive to the south though, let's call it
         # when things go north :P
-        save_model(model)
+        save_model(model, num_runs)
 
         # If the validation loss starts to increase, it's time for us to stop training...
-        if history.history['val_loss'][-1] > (val_loss + TRAIN_VAL_CHECK):
+        if num_runs > MIN_EPOCHS and history.history['val_loss'][-1] > (val_loss + TRAIN_VAL_CHECK):
             break
 
         # Store the validation loss for the next epoch
@@ -377,21 +359,22 @@ def test_predictions(model, df, num_tries=5):
         idx = int(len(subset)/2)
         img = img_pre_process(cv2.imread(os.path.join(PATH, subset.center.iloc[idx].strip())))
         img = np.resize(img, (1, IMG_ROWS, IMG_COLS, IMG_CH))
-        org_angle = subset.steering.iloc[idx] / ANGLE_SMOOTH_DIV
+        org_angle = subset.steering.iloc[idx]
         pred_angle = model.predict(img, batch_size=1)
         print(org_angle, pred_angle[0][0])
 
 
-def save_model(model):
+def save_model(model, epoch=''):
     """
     Saves the model and the weights to a json file
     :param model: The mode to be saved
+    :param epoch: The epoch number, so as to save the model to a different file name after each epoch
     :return: None
     """
     json_string = model.to_json()
-    with open('model.json', 'w') as outfile:
+    with open('model'+str(epoch)+'.json', 'w') as outfile:
         outfile.write(json_string)
-    model.save_weights('model.h5')
+    model.save_weights('model'+str(epoch)+'.h5')
     print('Model saved')
 
 
@@ -402,7 +385,7 @@ if __name__ == '__main__':
     # Load the data
     total_data = pd.read_csv(os.path.join(PATH, 'driving_log.csv'))
 
-    # Shuffle and split the dataset
+    # Shuffle and split the data set
     validate, train = np.split(total_data.sample(frac=1), [BATCH])
     del total_data
 
@@ -410,9 +393,6 @@ if __name__ == '__main__':
     steering_model = get_model()
 
     # Train the model
-    train_model(steering_model, train, validate, False)
-
-    # Save the model
-    save_model(steering_model)
+    train_model(steering_model, train, validate)
 
     exit(0)
