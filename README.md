@@ -218,41 +218,40 @@ I iterated through multiple models, and these were my progression
 I've finally latched onto a slightly simplified version of the VGG16
 pre-trained model.
 
-| Layer (type)                    |     Output Shape    | Param # |
-|---------------------------------|---------------------|---------|
-| lambda_1 (Lambda)               | (None, 64, 64, 3)   | 0       |
-| color_conv (Convolution2D)      | (None, 64, 64, 3)   | 12      |
-| block1_conv1 (Convolution2D)    | (None, 64, 64, 64)  | 1792    |
-| block1_conv2 (Convolution2D)    | (None, 64, 64, 64)  | 36928   |
-| block1_pool (MaxPooling2D)      | (None, 32, 32, 64)  | 0       |
-| block2_conv1 (Convolution2D)    | (None, 32, 32, 128) | 73856   |
-| block2_conv2 (Convolution2D)    | (None, 32, 32, 128) | 147584  |
-| block2_pool (MaxPooling2D)      | (None, 16, 16, 128) | 0       |
-| block3_conv1 (Convolution2D)    | (None, 16, 16, 256) | 295168  |
-| block3_conv2 (Convolution2D)    | (None, 16, 16, 256) | 590080  |
-| block3_conv3 (Convolution2D)    | (None, 16, 16, 256) | 590080  |
-| block3_pool (MaxPooling2D)      | (None, 8, 8, 256)   | 0       |
-| block4_conv1 (Convolution2D)    | (None, 8, 8, 512)   | 1180160 |
-| block4_conv2 (Convolution2D)    | (None, 8, 8, 512)   | 2359808 |
-| block4_conv3 (Convolution2D)    | (None, 8, 8, 512)   | 2359808 |
-| block4_pool (MaxPooling2D)      | (None, 4, 4, 512)   | 0       |
-| block5_conv1 (Convolution2D)    | (None, 4, 4, 512)   | 2359808 |
-| block5_conv2 (Convolution2D)    | (None, 4, 4, 512)   | 2359808 |
-| block5_conv3 (Convolution2D)    | (None, 4, 4, 512)   | 2359808 |
-| block5_pool (MaxPooling2D)      | (None, 2, 2, 512)   | 0       |
-| Flatten (Flatten)               | (None, 2048)        | 0       |
-| fc1 (Dense)                     | (None, 1024)        | 2098176 |
-| fc1_dropout (Dropout)           | (None, 1024)        | 0       |
-| fc2 (Dense)                     | (None, 256)         | 262400  |
-| fc2_dropout (Dropout)           | (None, 256)         | 0       |
-| fc3 (Dense)                     | (None, 128)         | 32896   |
-| fc3_dropout (Dropout)           | (None, 128)         | 0       |
-| fc4 (Dense)                     | (None, 64)          | 8256    |
-| fc4_dropout (Dropout)           | (None, 64)          | 0       |
-| fc5 (Dense)                     | (None, 32)          | 2080    |
-| fc5_dropout (Dropout)           | (None, 32)          | 0       |
-| output (Dense)                  | (None, 1)           | 33      |
-
+| Layer (type)                    |     Output Shape    | Param # | Trainable |
+|---------------------------------|---------------------|---------|-----------|
+| lambda_1 (Lambda)               | (None, 64, 64, 3)   | 0       | Yes       |
+| color_conv (Convolution2D)      | (None, 64, 64, 3)   | 12      | Yes       |
+| block1_conv1 (Convolution2D)    | (None, 64, 64, 64)  | 1792    | No        |
+| block1_conv2 (Convolution2D)    | (None, 64, 64, 64)  | 36928   | No        |
+| block1_pool (MaxPooling2D)      | (None, 32, 32, 64)  | 0       | No        |
+| block2_conv1 (Convolution2D)    | (None, 32, 32, 128) | 73856   | No        |
+| block2_conv2 (Convolution2D)    | (None, 32, 32, 128) | 147584  | No        |
+| block2_pool (MaxPooling2D)      | (None, 16, 16, 128) | 0       | No        |
+| block3_conv1 (Convolution2D)    | (None, 16, 16, 256) | 295168  | No        |
+| block3_conv2 (Convolution2D)    | (None, 16, 16, 256) | 590080  | No        |
+| block3_conv3 (Convolution2D)    | (None, 16, 16, 256) | 590080  | No        |
+| block3_pool (MaxPooling2D)      | (None, 8, 8, 256)   | 0       | No        |
+| block4_conv1 (Convolution2D)    | (None, 8, 8, 512)   | 1180160 | Yes       |
+| block4_conv2 (Convolution2D)    | (None, 8, 8, 512)   | 2359808 | Yes       |
+| block4_conv3 (Convolution2D)    | (None, 8, 8, 512)   | 2359808 | Yes       |
+| block4_pool (MaxPooling2D)      | (None, 4, 4, 512)   | 0       | Yes       |
+| block5_conv1 (Convolution2D)    | (None, 4, 4, 512)   | 2359808 | Yes       |
+| block5_conv2 (Convolution2D)    | (None, 4, 4, 512)   | 2359808 | Yes       |
+| block5_conv3 (Convolution2D)    | (None, 4, 4, 512)   | 2359808 | Yes       |
+| block5_pool (MaxPooling2D)      | (None, 2, 2, 512)   | 0       | Yes       |
+| Flatten (Flatten)               | (None, 2048)        | 0       | Yes       |
+| fc1 (Dense)                     | (None, 1024)        | 2098176 | Yes       |
+| fc1_dropout (Dropout)           | (None, 1024)        | 0       | Yes       |
+| fc2 (Dense)                     | (None, 256)         | 262400  | Yes       |
+| fc2_dropout (Dropout)           | (None, 256)         | 0       | Yes       |
+| fc3 (Dense)                     | (None, 128)         | 32896   | Yes       |
+| fc3_dropout (Dropout)           | (None, 128)         | 0       | Yes       |
+| fc4 (Dense)                     | (None, 64)          | 8256    | Yes       |
+| fc4_dropout (Dropout)           | (None, 64)          | 0       | Yes       |
+| fc5 (Dense)                     | (None, 32)          | 2080    | Yes       |
+| fc5_dropout (Dropout)           | (None, 32)          | 0       | Yes       |
+| output (Dense)                  | (None, 1)           | 33      | Yes       |
 **Total params:** 17118541
 
 Things to note are
@@ -271,9 +270,9 @@ figure out the best color space for the hypothesis
 model.add(Convolution2D(3, 1, 1, border_mode='same', name='color_conv'))
 ```
 * The remaining convolutional layers are directly taken from VGG16
-* I've added 5 fully connected layers in decreasing complexity as the
-classifier
+* I've added 5 fully connected layers in decreasing complexity as the classifier
 * I load the pre-trained no-top weights for the VGG16.
+* I ensure that the top 3 conv blocks from VGG16 are frozen and the other layers are trainable.
 
 ### Regularization
 We take care of regularization in three ways
@@ -303,24 +302,24 @@ progressively.
 ```python
 bias = 1. / (num_runs + 1.)
 ```
-* **Predictions**: I print out the predictions, as sometimes the model
-had a tendancy to predict a constant output.
+* **Predictions**: Sometimes the model had a tendancy to predict a constant output. I print out a set of predictions to ensure that the model was not converging to a single value during training.
 
 ## Driving
 During driving, one observation was that the model (because of my intent
 to smoothen the drive) does not take sharp curves at good speeds. I had
 two choices, one was to slow down during curves and the other was to
 multiply the predicted angle by a constant. Both approaches are used
-here to obtain a clean drive through Track 1.
+here to obtain a clean drive through Track 2. Track one was able to run without the above modifications
 
-## Testing
-My process of testing was to save the weights after each epoch as
-modelx.h5, and try all of them on the autonomous drive. The best model
-(model that fit the rubric the best) was renamed as model.h5 / model.json
-and pushed to the repository.
+### Track 1
+The model worked directly on track 1 with no changes.
+<a href="http://www.youtube.com/watch?feature=player_embedded&v=OG080eLUAkQ" target="_blank"><img src="http://img.youtube.com/vi/OG080eLUAkQ/0.jpg" alt="IMAGE ALT TEXT HERE" width="240" height="180" border="10" /></a>
+Note that towards the end, where the two shadow lines (electrical wires) come, the car turns oddly. This suggests that the model is very afraid of shadows.
 
-## Results
-TBD, add video
+### Track 2
+In lieu of Track 1 results, it was impossible to run the model on Track 2 with shadows enabled. So decreasing the quality to 'fastest', and increasing the throttle to 0.3 and multiplying the predicted steering angle by 1.4, we get
+<a href="http://www.youtube.com/watch?feature=player_embedded&v=gevcOvQnhGk" target="_blank"><img src="http://img.youtube.com/vi/gevcOvQnhGk/0.jpg" alt="IMAGE ALT TEXT HERE" width="240" height="180" border="10" /></a>
+Considering the amount of turns, and steep inclines, the model does spectacularly well.
 
 ## Reflections
 I've just got an incredible amount of respect for the people developing
@@ -333,7 +332,7 @@ that I received and the discussions I had with my class mates on slack
 and confluence.
 
 ## Future work
-* Make the model more generalized by completed Track 2
+* Incorporate augmented shadows in the training to make it more robust
 * Look at the models used in the Challenge-2, especially optical flow
 and lstm based (I've always loved the idea of RNNs)
 * See how well a simulator learned model works on real world data
@@ -343,7 +342,8 @@ this project for a complete steering solution
 control it.
 
 ## Acknowledgements
-* Vivek's wonderful post on data augmentation
-* NVidia's paper on end-to-end training
-* Comma.ai's paper on learning the simulator
-* VGG16 paper from Oxford
+* [Vivek's wonderful post on data augmentation](https://chatbotslife.com/using-augmentation-to-mimic-human-driving-496b569760a9)
+* [NVidia's paper on end-to-end training](https://arxiv.org/pdf/1604.07316v1.pdf)
+* [Comma.ai's steering model](https://github.com/commaai/research/blob/master/view_steering_model.py)
+* [VGG16 paper](https://arxiv.org/pdf/1409.1556.pdf)
+* [VGG16 model from keras](https://github.com/fchollet/keras/blob/master/keras/applications/vgg16.py)
