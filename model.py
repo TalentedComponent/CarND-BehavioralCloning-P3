@@ -22,15 +22,17 @@ PATH = '/home/karti/sdc-live-trainer/data'  # Data path
 # Data augmentation constants
 TRANS_X_RANGE = 100  # Number of translation pixels up to in the X direction for augmented data (-RANGE/2, RANGE/2)
 TRANS_Y_RANGE = 40  # Number of translation pixels up to in the Y direction for augmented data (-RANGE/2, RANGE/2)
-ANGLE_PER_TRANS = .15  # Maximum angle change when translating in the X direction
-OFF_CENTER_IMG_ANGLE = .2  # Angle change when using off center images
+TRANS_ANGLE = .3  # Maximum angle change when translating in the X direction
+OFF_CENTER_IMG = .25  # Angle change when using off center images
+
 BRIGHTNESS_RANGE = .25  # The range of brightness changes
+ANGLE_THRESHOLD = 1.  # The maximum magitude of the angle possible
 
 # Training constants
 BATCH = 128  # Number of images per batch
 TRAIN_BATCH_PER_EPOCH = 160  # Number of batches per epoch for training
 TRAIN_VAL_CHECK = 1e-3  # The maximum increase in validation loss during re-training
-MIN_EPOCHS = 4  # Minimum number of epochs to train the model on
+EPOCHS = 10  # Minimum number of epochs to train the model on
 
 # Image constants
 IMG_ROWS = 64  # Number of rows in the image
@@ -89,22 +91,22 @@ def data_augment(img_path, angle, threshold, bias):
     """
     # Randomly form the X translation distance and compute the resulting steering angle change
     x_translation = (TRANS_X_RANGE * np.random.uniform()) - (TRANS_X_RANGE / 2)
-    new_angle = angle + (abs(angle) / 0.125) * ((x_translation / TRANS_X_RANGE) * 2) * ANGLE_PER_TRANS
+    new_angle = angle + ((x_translation / TRANS_X_RANGE) * 2) * TRANS_ANGLE
 
     # Check if the new angle does not meets the threshold requirements
-    if (abs(new_angle) + bias) < threshold:
+    if (abs(new_angle) + bias) < threshold or abs(new_angle) > 1.:
         return None, None
 
-    # Hurray, the newly generated angle matches the threshold
-    img = cv2.imread(img_path)
-    img = img_change_brightness(img)
-    img = img_translate(img, x_translation)
-    img = img_pre_process(img)
+    # Let's read the image
+    img = cv2.imread(img_path)  # Read in the image
+    img = img_change_brightness(img)  # Randomly change the brightness
+    img = img_translate(img, x_translation)  # Translate the image in X and Y direction
+    if np.random.randint(2) == 0:  # Flip the image
+        img = np.fliplr(img)
+        new_angle = -new_angle
+    img = img_pre_process(img)  # Pre process the image
 
-    # Finally, lets' decide if we want to flip the image or not
-    if np.random.randint(2) == 0:
-        return img, new_angle
-    return np.fliplr(img), -new_angle
+    return img, new_angle
 
 
 def val_data_generator(df):
@@ -158,12 +160,12 @@ def train_data_generator(df, bias):
 
         if img_choice == 0:
             img_path = os.path.join(PATH, df.left.iloc[idx].strip())
-            angle += (abs(angle) / 0.125) * OFF_CENTER_IMG_ANGLE
+            angle += OFF_CENTER_IMG
         elif img_choice == 1:
             img_path = os.path.join(PATH, df.center.iloc[idx].strip())
         else:
             img_path = os.path.join(PATH, df.right.iloc[idx].strip())
-            angle -= (abs(angle) / 0.125) * OFF_CENTER_IMG_ANGLE
+            angle -= OFF_CENTER_IMG
 
         """
         Randomly distort the (img, angle) to generate new data
@@ -296,10 +298,12 @@ def train_model(model, train_data, val_data):
     3. we start with a smaller learning rate so as to not over-fit the data
     4. We enable data augmentation so that the data generalizes now
     """
-    # Make the bottom two Conv Layers trainable in VGG16
-    for layer in model.layers[:11]:
+    # Make the top 2 and the bottom two Conv Layers along with all the FC layers trainable
+    for layer in model.layers[0:2]:
+        layer.trainable = True
+    for layer in model.layers[2:12]:
         layer.trainable = False
-    for layer in model.layers[11:]:
+    for layer in model.layers[12:]:
         layer.trainable = True
 
     # Recompile the model with a finer learning rate
@@ -337,11 +341,8 @@ def train_model(model, train_data, val_data):
         save_model(model, num_runs)
 
         # If the validation loss starts to increase, it's time for us to stop training...
-        if num_runs > MIN_EPOCHS and history.history['val_loss'][-1] > (val_loss + TRAIN_VAL_CHECK):
+        if num_runs > EPOCHS:
             break
-
-        # Store the validation loss for the next epoch
-        val_loss = history.history['val_loss'][-1]
 
 
 def test_predictions(model, df, num_tries=5):
