@@ -79,25 +79,22 @@ the augmentation that I do on the data set
 
 #### Randomly choosing between left, center or right image
 Choose images randomly between left, right or center images by doing
-the following. Note, the simple approach is to add / subtract a static
-offset from the angle when choosing the left / right image. But to get
-a smoother drive, we can add / subtract an offset that's weighted by
-tha magnitude of the angle. So if the base angle is larger, we'll be
-adding / subtracting a larger offset from the off-center images. This
-again allows our model to drive smooth in straght sections while ensuring
-to take a tight turn in curves.
+the following. The approach is to add / subtract a static offset from
+the angle when choosing the left / right image. To get a smoother drive,
+we can add / subtract an offset that's weighted by the magnitude of the
+angle. But this biases the model towards 0s again and is a design
+tradeoff. I chose the simple static offsets.
 ```python
-# Pick one of the images, left, right or center
 img_choice = np.random.randint(3)
 
 if img_choice == 0:
     img_path = os.path.join(PATH, df.left.iloc[idx].strip())
-    angle += (abs(angle) / 0.125) * OFF_CENTER_IMG_ANGLE
+    angle += OFF_CENTER_IMG
 elif img_choice == 1:
     img_path = os.path.join(PATH, df.center.iloc[idx].strip())
 else:
     img_path = os.path.join(PATH, df.right.iloc[idx].strip())
-    angle -= (abs(angle) / 0.125) * OFF_CENTER_IMG_ANGLE
+    angle -= OFF_CENTER_IMG
 ```
 
 #### Flipping the image
@@ -105,8 +102,8 @@ This is the easiest and here I just flip the image on it's vertical
 axis and invert the sign of the angle. And I do this randomly
 ```python
 if np.random.randint(2) == 0:
-    return img, angle
-return np.fliplr(img), -angle
+    img = np.fliplr(img)
+    new_angle = -new_angle
 ```
 
 #### Changing brightness
@@ -125,17 +122,12 @@ return cv2.cvtColor(temp, cv2.COLOR_HSV2RGB)
 
 #### Changing X and Y translation
 This is also similar to what Vivek does and i've just made it generalized.
-I've also made the angle offsets for the translation a weighted change
-rather than a static change to result in a more smoother drive. What this
-does is that the higher the base angle, the more the translation affects.
-This is to simulate the fact that if we are on a straight track and we
-drift out, it's ok for us to correct slowly, but on a tight curve, we need
-to correct ASAP.
-This change is what allows the model to drive reasonably smooth.
+This is to simulate drifting of the car and it's correction back beyond
+what the left and the right camera images allow us.
 ```python
 # Compute X translation
 x_translation = (TRANS_X_RANGE * np.random.uniform()) - (TRANS_X_RANGE / 2)
-new_angle = angle + (abs(angle) / 0.125) * ((x_translation / TRANS_X_RANGE) * 2) * ANGLE_PER_TRANS
+new_angle = angle + ((x_translation / TRANS_X_RANGE) * 2) * TRANS_ANGLE
 
 # Randomly compute a Y translation
 y_translation = (TRANS_Y_RANGE * np.random.uniform()) - (TRANS_Y_RANGE / 2)
@@ -189,17 +181,18 @@ return np.resize(resize, (1, IMG_ROWS, IMG_COLS, IMG_CH))
 #### Visualizing data after the augmentation
 So let's see what impact we've made on the data.
 
-**Bias 0.0**
-
-![](img/gen_hist_0.png)
-
 **Bias 1.0**
 
 ![](img/gen_hist_1.png)
 
-You can see that the generated data is distributed very well as we change
-the bias. This will allow us to between epochs so that we can tweak the
-model as we move over the epochs.
+**Bias 0.0**
+
+![](img/gen_hist_0.png)
+
+You can see that the when we allow a bias of 1.0,
+the data is nicely guassian shaped, but as we reduce bias to 0.0, the 0
+angle data is severely punished allowing our model to incrementally
+learn a more complex hypothesis.
 
 We can also plot some of the images to see how the images look post
 augmentation. We can see that we've got a variety of images spanning
@@ -293,7 +286,13 @@ There is no reason for a test set, since we can test directly by allowing
 the car to drive.
 
 ## Training
-
+* **Generator**: In this training, we use a generator (inspired again
+from Vivek), which randomly samples the set of available images (including left and right)
+from the CSV file, randomly flips it, randomly changes brightness, randomly
+translates it in the X and Y direction (also changing the angle) and
+pre-processes the images and feeds to the model. This is great because
+keras ensures that while the GPUs are busy training the model, the CPU
+can in parallel generate the data using the generator.
 * **Optimizer**: Adam with a learning rate of 1e-5. This was emperically
 noted as we are transfer learning (fine tuning an existing model).
 * **Bias**: We start with a bias of 1.0 (allow all angles) and slowly
@@ -313,12 +312,16 @@ here to obtain a clean drive through Track 2. Track one was able to run without 
 
 ### Track 1
 The model worked directly on track 1 with no changes.
+
 <a href="http://www.youtube.com/watch?feature=player_embedded&v=OG080eLUAkQ" target="_blank"><img src="http://img.youtube.com/vi/OG080eLUAkQ/0.jpg" alt="IMAGE ALT TEXT HERE" width="240" height="180" border="10" /></a>
+
 Note that towards the end, where the two shadow lines (electrical wires) come, the car turns oddly. This suggests that the model is very afraid of shadows.
 
 ### Track 2
 In lieu of Track 1 results, it was impossible to run the model on Track 2 with shadows enabled. So decreasing the quality to 'fastest', and increasing the throttle to 0.3 and multiplying the predicted steering angle by 1.4, we get
+
 <a href="http://www.youtube.com/watch?feature=player_embedded&v=gevcOvQnhGk" target="_blank"><img src="http://img.youtube.com/vi/gevcOvQnhGk/0.jpg" alt="IMAGE ALT TEXT HERE" width="240" height="180" border="10" /></a>
+
 Considering the amount of turns, and steep inclines, the model does spectacularly well.
 
 ## Reflections
